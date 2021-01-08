@@ -62,3 +62,13 @@ export const decrementComponent = (send, componentId) => {
         }
     }))
 }
+
+export const moveOwnHand = (send, x, y) => {
+    send(JSON.stringify({
+        'type': 'MoveOwnHand',
+        'payload': {
+            'x': x,
+            'y': y
+        }
+    }))
+}

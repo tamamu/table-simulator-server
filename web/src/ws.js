@@ -17,6 +17,10 @@ export const useWebsocket = (url, {onOpen = () => {}, onMessage = () => {}, onCl
     }, [])
 
     return {
-        sendMessage: (message) => socketRef.current.send(message)
+        sendMessage: (message) => {
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                socketRef.current.send(message)
+            }
+        }
     }
 }

@@ -16,6 +16,14 @@ pub enum ComponentRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct Hand {
+    id: usize,
+    x: f64,
+    y: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct Component {
     id: usize,
     role: ComponentRole,
@@ -98,13 +106,14 @@ pub struct WsActor {
     sessions: HashMap<u32, Recipient<Message>>,
     players: Vec<u32>,
     components: Vec<Component>,
+    hands: HashMap<u32, Hand>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all(serialize = "camelCase", deserialize = "PascalCase"))]
 pub enum Notification {
     #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
-    ConnectPlayer{player_number: usize},
+    ConnectPlayer{player_number: usize, hand: Hand},
     #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     DisconnectPlayer{player_number: usize},
     #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
@@ -126,6 +135,13 @@ pub enum Notification {
     DecrementComponent{component_id: usize},
     #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     MoveComponent{component_id: usize, x: f64, y: f64},
+
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+    SetHands{hands: Vec<Hand>},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+    MoveOwnHand{x: f64, y: f64},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+    MoveHand{player_number: usize, x: f64, y: f64},
 }
 
 #[derive(Message)]
@@ -157,6 +173,7 @@ impl WsActor {
             sessions: HashMap::new(),
             players: Vec::new(),
             components: create_components(),
+            hands: HashMap::new(),
         }
     }
 
@@ -208,17 +225,20 @@ impl Handler<Connect> for WsActor {
     fn handle(&mut self, msg: Connect, _: &mut Context<Self>) -> Self::Result {
         let client_id = rand::random::<u32>();
         self.players.push(client_id);
-        let player_number = self.players.iter().position(|&r| r == client_id).unwrap() + 1;
-
+        let player_index = self.players.iter().position(|&r| r == client_id).unwrap();
+        let player_number = player_index + 1;
+        self.hands.insert(client_id, Hand {id: player_number, x: 0., y: 0.});
+        
         msg.addr.notifies(vec![
             Notification::PlayerNumber{player_number},
-            Notification::SetComponents{components: self.components.clone()}
-        ]);
+            Notification::SetComponents{components: self.components.clone()},
+            Notification::SetHands{hands: self.players.iter().map(|cid| self.hands.get(cid).unwrap().clone()).collect()}
+            ]);
 
         self.sessions.insert(client_id, msg.addr);
 
         self.send_message(vec![
-            Notification::ConnectPlayer{player_number}
+            Notification::ConnectPlayer{player_number, hand: self.hands.get(&client_id).unwrap().clone()}
         ]);
 
         client_id
@@ -230,11 +250,13 @@ impl Handler<Disconnect> for WsActor {
 
     fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
         let client_id = msg.id;
-        let player_number = self.players.iter().position(|&r| r == client_id).unwrap() + 1;
+        let player_index = self.players.iter().position(|&r| r == client_id).unwrap();
+        let player_number = player_index + 1;
         self.send_message(vec![
             Notification::DisconnectPlayer{player_number}
         ]);
         self.sessions.remove(&client_id);
+        self.hands.remove(&client_id);
         self.players.retain(|&r| r != client_id);
         self.notify_all_player_numbers();
     }
@@ -244,7 +266,7 @@ impl Handler<ClientMessage> for WsActor {
     type Result = ();
 
     fn handle(&mut self, msg: ClientMessage, _: &mut Context<Self>) {
-        debug!("Message from client: {}", msg.msg);
+        //debug!("Message from client: {}", msg.msg);
         let client_id = msg.id;
         let player_number = self.players.iter().position(|&r| r == client_id).unwrap() + 1;
 
@@ -298,6 +320,14 @@ impl Handler<ClientMessage> for WsActor {
                         self.components[component_id].y = y;
                         self.send_message_except(msg.id, vec![
                             Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
+                        ]);
+                    }
+                    Notification::MoveOwnHand{x, y} => {
+                        let hand = self.hands.get_mut(&msg.id).unwrap();
+                        hand.x = x;
+                        hand.y = y;
+                        self.send_message_except(msg.id, vec![
+                            Notification::MoveHand {player_number, x, y}
                         ]);
                     }
                     _ => {
