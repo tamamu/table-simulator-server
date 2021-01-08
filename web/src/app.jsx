@@ -3,17 +3,25 @@ import {useState, useEffect, useRef} from 'react'
 import * as ReactDOM from 'react-dom'
 import styled from 'styled-components'
 
+import {useNotificationReducer} from './store'
+import {useWebsocket} from './ws'
+import {useDragEffect} from './drag'
+import * as Remote from './remote'
+
 const Info = styled.h1`
     color: ${props => ['red', 'green', 'blue'][(props.playerNumber - 1)]};
 `
 
-const Rect = styled.div`
+const Rect = styled.div.attrs(props => ({
+    style: {
+        left: `${props.x}px`,
+        top: `${props.y}px`
+    }
+}))`
     position: absolute;
     display: block;
     width: ${props => props.width}px;
     height: ${props => props.height}px;
-    left: ${props => props.x}px;
-    top: ${props => props.y}px;
     background: ${props =>
         props.hidden || !props.isOpened ?
             'black'
@@ -27,218 +35,140 @@ const Rect = styled.div`
         };
 `
 
-const initialTable = {components: []}
-
-const tableReducer = (table, action) => {
-    switch (action.type) {
-        case 'UPDATE_COMPONENT':
-            let components = [...table.components]
-            components[action.payload.componentId] = action.payload.component
-            return {components}
-        case 'SET_TABLE':
-            console.log("update table!")
-            return action.payload.table
-        default:
-            return table
+const onComponentMouseLeft = (state, ev, component, sendMessage) => {
+    switch (component.role) {
+        case 'text':
+            if (component.selectability && (component.user === null || component.user === state.playerNumber)) {
+                if (component.isSelected) {
+                    Remote.unselectComponent(sendMessage, component.id)
+                } else {
+                    Remote.selectComponent(sendMessage, component.id)
+                }
+            }
+            break
+        case 'counter':
+            if (component.user === null || component.user === state.playerNumber) {
+                Remote.incrementComponent(sendMessage, component.id)
+            }
+            break
     }
 }
 
+const onComponentMouseMiddle = (state, ev, component, sendMessage) => {
+
+}
+
+const onComponentMouseRight = (state, ev, component, sendMessage) => {
+    switch (component.role) {
+        case 'text':
+            if (component.user === null || component.user === state.playerNumber) {
+                if (component.isOpened) {
+                    Remote.closeComponent(sendMessage, component.id)
+                } else {
+                    Remote.openComponent(sendMessage, component.id)
+                }
+            }
+            break
+        case 'counter':
+            if (component.user === null || component.user === state.playerNumber) {
+                Remote.decrementComponent(sendMessage, component.id)
+            }
+            break
+    }
+}
+
+
+
+
 const App = () => {
-    const [table, dispatchTable] = React.useReducer(tableReducer, initialTable)
-    const [playerNumber, setPlayerNumber] = useState()
-    const socketRef = useRef()
+    const [state, dispatch] = useNotificationReducer()
     const hbRef = useRef(Date.now())
 
-    useEffect(() => {
-        console.log(table)
-    }, [table])
-
-    useEffect(() => {
-        const socket = new WebSocket(`ws://${location.host}/ws/`)
-        socket.addEventListener('open', _ => {
-            //socket.send('hi!')
-        })
-        socket.addEventListener('error', event => {
-            console.error(`WebSocket error: `, event)
-        })
-        socket.addEventListener('close', _ => {
-            console.log('closed!')
-        })
-        socket.addEventListener('message', event => {
-            console.info('Message from server ', event.data)
+    const {sendMessage} = useWebsocket(`ws://${location.host}/ws/`, {
+        onOpen: () => {},
+        onError: ev => {
+            console.error(`WebSocket error: `, ev)
+        },
+        onClose: () => {},
+        onMessage: ev => {
             try {
-                let notifications = JSON.parse(event.data)
+                let notifications = JSON.parse(ev.data)
                 notifications.forEach(notif => {
-                    switch(notif.type) {
-                        case 'PlayerNumber':
-                            setPlayerNumber(notif.payload.player_number)
-                            break
-                        case 'Table':
-                            dispatchTable({type: 'SET_TABLE', payload: {table: notif.payload.table}})
-                            break
-                        case 'UpdateComponent':
-                            dispatchTable({type: 'UPDATE_COMPONENT', payload: {
-                                componentId: notif.payload.component_id,
-                                component: notif.payload.component
-                            }})
-                            break
-                        default:
-                            console.info(notif.type)
-                            break
-                    }
+                    dispatch(notif)
                 })
             } catch (error) {
                 console.error(error)
             }
-            
+        }
+    })
+
+    const onMoveComponent = ({target, x, y}, forceNotify = false) => {
+        const posX = x - target.w/2
+        const posY = y - target.h/2
+
+        // local
+        dispatch({
+            type: 'updateComponent',
+            payload: {
+                componentId: target.id,
+                component: {...target, x: posX, y: posY}
+            }
         })
-        socketRef.current = socket
-    }, [])
 
-    const notifySelectComponent = (componentId) => {
-        socketRef.current.send(JSON.stringify({
-            'type': 'SelectComponent',
-            'payload': {
-                'component_id': componentId
-            }
-        }))
-    }
-
-    const notifyUnselectComponent = (componentId) => {
-        socketRef.current.send(JSON.stringify({
-            'type': 'UnselectComponent',
-            'payload': {
-                'component_id': componentId
-            }
-        }))
-    }
-
-    const notifyOpenComponent = (componentId) => {
-        socketRef.current.send(JSON.stringify({
-            'type': 'OpenComponent',
-            'payload': {
-                'component_id': componentId
-            }
-        }))
-    }
-
-    const notifyCloseComponent = (componentId) => {
-        socketRef.current.send(JSON.stringify({
-            'type': 'CloseComponent',
-            'payload': {
-                'component_id': componentId
-            }
-        }))
-    }
-
-    const notifyMoveComponent = (componentId, x, y) => {
-        socketRef.current.send(JSON.stringify({
-            'type': 'MoveComponent',
-            'payload': {
-                'component_id': componentId,
-                'x': x,
-                'y': y
-            }
-        }))
-    }
-
-    const notifyIncrementComponent = (componentId) => {
-        socketRef.current.send(JSON.stringify({
-            'type': 'IncrementComponent',
-            'payload': {
-                'component_id': componentId,
-            }
-        }))
-    }
-
-    const notifyDecrementComponent = (componentId) => {
-        socketRef.current.send(JSON.stringify({
-            'type': 'DecrementComponent',
-            'payload': {
-                'component_id': componentId,
-            }
-        }))
-    }
-
-    const componentClickFactory = component => ev => {
-        switch (component.role) {
-            case 'Text':
-                if (component.selectability && (component.user === null || component.user === playerNumber)) {
-                    if (component.is_selected) {
-                        notifyUnselectComponent(component.id)
-                    } else {
-                        notifySelectComponent(component.id)
-                    }
-                }
-                break
-            case 'Counter':
-                if (component.user === null || component.user === playerNumber) {
-                    notifyIncrementComponent(component.id)
-                }
-                break
+        if (forceNotify || Date.now() - hbRef.current > 50) {
+            hbRef.current = Date.now()
+            // remote
+            Remote.moveComponent(sendMessage, target.id, posX, posY)
         }
     }
 
-    const componentContextmenuFactory = component => ev => {
-        ev.preventDefault();
-        switch (component.role) {
-            case 'Text':
-                if (component.user === null || component.user === playerNumber) {
-                    if (component.is_opened) {
-                        notifyCloseComponent(component.id)
-                    } else {
-                        notifyOpenComponent(component.id)
-                    }
-                }
-                break
-            case 'Counter':
-                if (component.user === null || component.user === playerNumber) {
-                    notifyDecrementComponent(component.id)
-                }
-                break
-        }
-    }
+    const {setDragTarget} = useDragEffect({
+        onDrag: onMoveComponent,
+        onDragEnd: st => onMoveComponent(st, true)
+    })
 
-    const componentDragFactory = (component, force_notify = false) => ev => {
-        if (component.user != null && component.user != playerNumber) {
+    const onComponentMouseDown = (ev, component, sendMessage) => {
+        ev.preventDefault()
+        if (component.user != null && component.user != state.playerNumber) {
             return
         }
-        const x = ev.clientX - component.w/2
-        const y = ev.clientY - component.h/2
-        
-        const newComponent = {...component, x, y}
-        dispatchTable({type: 'UPDATE_COMPONENT', payload: {componentId: component.id, component: newComponent}})
-
-        if (force_notify || Date.now() - hbRef.current > 50) {
-            hbRef.current = Date.now()
-            notifyMoveComponent(component.id, x, y)
-        }
+        // delay dragging to identify whether it is a click or not
+        setDragTarget(component, 100).catch(() => {
+            switch(ev.button) {
+                case 0://left
+                    onComponentMouseLeft(state, ev, component, sendMessage)
+                    break
+                case 1://middle
+                    onComponentMouseMiddle(state, ev, component, sendMessage)
+                    break
+                case 2://right
+                    onComponentMouseRight(state, ev, component, sendMessage)
+                    break
+            }
+        })
     }
 
     return (
     <div>
-        <Info playerNumber={playerNumber}>Player {playerNumber}</Info>
-        {table.components.map(component => {
-            const hidden = component.hide_others && component.user != playerNumber
+        <Info playerNumber={state.playerNumber}>Player {state.playerNumber}</Info>
+        {Object.entries(state.components).map(([componentId, component]) => {
+            const hidden = component.hideOthers && component.user != state.playerNumber
             return (
-            <Rect onClick={componentClickFactory(component)}
-                  onContextMenu={componentContextmenuFactory(component)}
-                  draggable="true"
-                  onDrag={componentDragFactory(component)}
-                  onDragEnd={componentDragFactory(component, true)}
+            <Rect onMouseDown={ev => onComponentMouseDown(ev, component, sendMessage)}
+                  onContextMenu={ev => ev.preventDefault()}
                   id={component.id}
                   key={component.id}
                   number={component.number}
                   image={component.image}
                   selectability={component.selectability}
-                  isOpened={component.is_opened}
-                  isSelected={component.is_selected}
+                  isOpened={component.isOpened}
+                  isSelected={component.isSelected}
                   hidden={hidden}
                   x={component.x}
                   y={component.y}
                   width={component.w}
                   height={component.h}
-                  user={component.user}>{hidden ? "" : (component.role === 'Text' ? component.text : component.role === 'Counter' ? component.number : "")}</Rect>
+                  user={component.user}>{hidden ? "" : (component.role === 'text' ? component.text : component.role === 'counter' ? component.number : "")}</Rect>
             )
         }
         )}

@@ -5,6 +5,7 @@ use serde_json::Result;
 use log::{debug, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "PascalCase"))]
 pub enum ComponentRole {
     Cursor,
     Builder,
@@ -14,6 +15,7 @@ pub enum ComponentRole {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct Component {
     id: usize,
     role: ComponentRole,
@@ -25,10 +27,10 @@ pub struct Component {
     text: String,
     number: i64,
     image: Option<String>,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
 }
 
 impl Component {
@@ -38,7 +40,7 @@ impl Component {
         user: Option<usize>,
         hide_others: bool,
         text: String,
-        x: i32, y: i32, w: i32, h: i32,
+        x: f64, y: f64, w: f64, h: f64,
     ) -> Self {
         Self {
             id,
@@ -57,7 +59,7 @@ impl Component {
     pub fn counter(id: usize,
         user: Option<usize>,
         number: i64,
-        x: i32, y: i32, w: i32, h: i32,
+        x: f64, y: f64, w: f64, h: f64,
     ) -> Self {
         Self {
             id,
@@ -75,53 +77,55 @@ impl Component {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Table {
-    components: Vec<Component>,
-}
-
-impl std::default::Default for Table {
-    fn default() -> Self {
-        Self {
-            components: vec![
-                Component::card(0, true, true, Some(1), false,
-                    "プレイヤー1の操作カード".to_owned(), 32, 32, 100, 100),
-                Component::card(1, true, true, Some(2), false,
-                    "プレイヤー2の操作カード".to_owned(), 96, 32, 100, 100),
-                Component::card(2, true, true, None, false,
-                    "みんな操作できるカード".to_owned(), 32, 96, 100, 100),
-                Component::card(3, true, true, Some(1), true,
-                    "プレイヤー1しか見えない".to_owned(), 96, 96, 100, 100),
-                Component::card(4, true, true, Some(2), true,
-                    "プレイヤー2しか見えない".to_owned(), 64, 64, 100, 100),
-                Component::counter(5, Some(1), 0, 160, 32, 100, 100),
-                Component::counter(6, Some(2), 0, 160, 96, 100, 100),
-            ],
-        }
-    }
+fn create_components() -> Vec<Component> {
+    vec![
+        Component::card(0, true, true, Some(1), false,
+            "プレイヤー1の操作カード".to_owned(), 32., 32., 100., 100.),
+        Component::card(1, true, true, Some(2), false,
+            "プレイヤー2の操作カード".to_owned(), 96., 32., 100., 100.),
+        Component::card(2, true, true, None, false,
+            "みんな操作できるカード".to_owned(), 32., 96., 100., 100.),
+        Component::card(3, true, true, Some(1), true,
+            "プレイヤー1しか見えない".to_owned(), 96., 96., 100., 100.),
+        Component::card(4, true, true, Some(2), true,
+            "プレイヤー2しか見えない".to_owned(), 64., 64., 100., 100.),
+        Component::counter(5, Some(1), 0, 160., 32., 100., 100.),
+        Component::counter(6, Some(2), 0, 160., 96., 100., 100.),
+    ]
 }
 
 pub struct WsActor {
     sessions: HashMap<u32, Recipient<Message>>,
     players: Vec<u32>,
-    table: Table,
+    components: Vec<Component>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "payload")]
+#[serde(tag = "type", content = "payload", rename_all(serialize = "camelCase", deserialize = "PascalCase"))]
 pub enum Notification {
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     ConnectPlayer{player_number: usize},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     DisconnectPlayer{player_number: usize},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     PlayerNumber{player_number: usize},
-    Table{table: Table},
+    SetComponents{components: Vec<Component>},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     UpdateComponent{component_id: usize, component: Component},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     SelectComponent{component_id: usize},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     UnselectComponent{component_id: usize},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     OpenComponent{component_id: usize},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     CloseComponent{component_id: usize},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     IncrementComponent{component_id: usize},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
     DecrementComponent{component_id: usize},
-    MoveComponent{component_id: usize, x: i32, y: i32},
+    #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+    MoveComponent{component_id: usize, x: f64, y: f64},
 }
 
 #[derive(Message)]
@@ -152,7 +156,7 @@ impl WsActor {
         Self {
             sessions: HashMap::new(),
             players: Vec::new(),
-            table: Table::default(),
+            components: create_components(),
         }
     }
 
@@ -208,7 +212,7 @@ impl Handler<Connect> for WsActor {
 
         msg.addr.notifies(vec![
             Notification::PlayerNumber{player_number},
-            Notification::Table{table: self.table.clone()}
+            Notification::SetComponents{components: self.components.clone()}
         ]);
 
         self.sessions.insert(client_id, msg.addr);
@@ -248,52 +252,52 @@ impl Handler<ClientMessage> for WsActor {
             Ok(notif) => {
                 match notif {
                     Notification::SelectComponent{component_id} => {
-                        self.table.components[component_id].is_selected = true;
+                        self.components[component_id].is_selected = true;
                         self.send_message(vec![
-                            Notification::UpdateComponent {component_id, component: self.table.components[component_id].clone()}
+                            Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
                         ]);
                     }
                     Notification::UnselectComponent{component_id} => {
-                        self.table.components[component_id].is_selected = false;
+                        self.components[component_id].is_selected = false;
                         self.send_message(vec![
-                            Notification::UpdateComponent {component_id, component: self.table.components[component_id].clone()}
+                            Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
                         ]);
                     }
                     Notification::OpenComponent{component_id} => {
-                        self.table.components[component_id].is_opened = true;
+                        self.components[component_id].is_opened = true;
                         self.send_message(vec![
-                            Notification::UpdateComponent {component_id, component: self.table.components[component_id].clone()}
+                            Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
                         ]);
                     }
                     Notification::CloseComponent{component_id} => {
-                        self.table.components[component_id].is_opened = false;
+                        self.components[component_id].is_opened = false;
                         self.send_message(vec![
-                            Notification::UpdateComponent {component_id, component: self.table.components[component_id].clone()}
+                            Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
                         ]);
                     }
                     Notification::IncrementComponent{component_id} => {
-                        self.table.components[component_id].number += 1;
+                        self.components[component_id].number += 1;
                         self.send_message(vec![
-                            Notification::UpdateComponent {component_id, component: self.table.components[component_id].clone()}
+                            Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
                         ]);
                     }
                     Notification::DecrementComponent{component_id} => {
-                        self.table.components[component_id].number -= 1;
+                        self.components[component_id].number -= 1;
                         self.send_message(vec![
-                            Notification::UpdateComponent {component_id, component: self.table.components[component_id].clone()}
+                            Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
                         ]);
                     }
                     Notification::MoveComponent{component_id, x, y} => {
-                        if let Some(user_number) = self.table.components[component_id].user {
+                        if let Some(user_number) = self.components[component_id].user {
                             if user_number != player_number {
                                 debug!("could not move the component");
                                 return;
                             }
                         }
-                        self.table.components[component_id].x = x;
-                        self.table.components[component_id].y = y;
+                        self.components[component_id].x = x;
+                        self.components[component_id].y = y;
                         self.send_message_except(msg.id, vec![
-                            Notification::UpdateComponent {component_id, component: self.table.components[component_id].clone()}
+                            Notification::UpdateComponent {component_id, component: self.components[component_id].clone()}
                         ]);
                     }
                     _ => {
